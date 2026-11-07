@@ -16,6 +16,18 @@ const text = (body, status = 200) =>
 const fmt = (ms) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
 const pct = (n, d) => (d > 0 ? ((n * 100) / d).toFixed(1) + "%" : "-");
 
+// Gold is closed from Friday ~22:00 UTC to Sunday ~22:00 UTC. Data feeds fill that gap
+// with flat candles that create fake signals. TradingView has no bars there, so drop them.
+function marketOpen(t) {
+  const d = new Date(t);
+  const day = d.getUTCDay(); // 0 = Sunday ... 6 = Saturday
+  const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+  if (day === 6) return false;
+  if (day === 5 && mins >= 22 * 60) return false;
+  if (day === 0 && mins < 22 * 60) return false;
+  return true;
+}
+
 export default async (req) => {
   const q = new URL(req.url).searchParams;
   const tf = q.get("tf") || "15min";
@@ -23,6 +35,8 @@ export default async (req) => {
 
   const apiKey = process.env.TWELVE_API_KEY;
   if (!apiKey) return text("Missing TWELVE_API_KEY in Netlify environment variables", 500);
+
+  const nShow = Math.min(Number(q.get("n")) || 12, 40);
 
   // optional overrides so you can match your TradingView settings: ?kv=1&atr=1&ha=1
   const cfg = {};
@@ -45,7 +59,7 @@ export default async (req) => {
   }
 
   const now = Date.now();
-  const candles = json.values
+  let candles = json.values
     .map((v) => ({
       t: Date.parse(v.datetime.replace(" ", "T") + "Z"),
       o: +v.open,
@@ -56,6 +70,12 @@ export default async (req) => {
     // keep closed candles only, the bot never acts on the forming candle
     .filter((k) => k.t + TF_MS[tf] <= now);
 
+  const rawCount = candles.length;
+  const rawLast = candles[rawCount - 1];
+  // drop weekend / market-closed candles and flat candles (range under 5 cents)
+  candles = candles.filter((k) => marketOpen(k.t) && k.h - k.l >= 0.05);
+  const dropped = rawCount - candles.length;
+
   const r = analyze(candles, cfg);
   const c = r.cfg;
   const s = r.stats;
@@ -63,11 +83,12 @@ export default async (req) => {
 
   const lines = [];
   lines.push(`XAU/USD ${tf} | key ${c.keyValue}, ATR ${c.atrPeriod}, HeikinAshi ${c.useHA ? "on" : "off"}`);
-  lines.push(`Closed candles used: ${candles.length}`);
+  lines.push(`Closed candles used: ${candles.length} (dropped ${dropped} weekend/flat)`);
+  if (rawLast && !candles.includes(rawLast)) lines.push("Market looks CLOSED right now (latest candles are flat)");
   lines.push(`Last closed candle opened: ${fmt(last.t)} UTC / ${fmt(last.t + 3600000)} WAT`);
   lines.push("");
-  lines.push("Last 12 signals (time = candle open):");
-  for (const g of r.signals.slice(-12).reverse()) {
+  lines.push(`Last ${nShow} signals (time = candle open):`);
+  for (const g of r.signals.slice(-nShow).reverse()) {
     lines.push(
       `${g.kind.padEnd(5)} ${fmt(g.t)} UTC | ${fmt(g.t + 3600000)} WAT  @ ${g.price.toFixed(2)}`
     );
@@ -86,3 +107,4 @@ export default async (req) => {
   }
   return text(lines.join("\n"));
 };
+    
