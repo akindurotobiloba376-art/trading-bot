@@ -38,11 +38,25 @@ export default async (req) => {
 
   const nShow = Math.min(Number(q.get("n")) || 12, 40);
 
-  // optional overrides so you can match your TradingView settings: ?kv=1&atr=1&ha=1
-  const cfg = {};
+  // defaults = your TradingView chart settings (XAUUSD 15m); override in the address if needed
+  const cfg = {
+    linregLen: 14,
+    signalLen: 14,
+    keyValue: 1.2,
+    atrPeriod: 10,
+    useHA: true,
+    allowCont: false,
+    tp1Pips: 30,
+    tp2Pips: 60,
+    tp3Pips: 100,
+    slPips: 150,
+  };
   if (q.get("kv")) cfg.keyValue = Number(q.get("kv"));
   if (q.get("atr")) cfg.atrPeriod = Number(q.get("atr"));
   if (q.get("ha")) cfg.useHA = q.get("ha") === "1";
+  if (q.get("ll")) cfg.linregLen = Number(q.get("ll"));
+  if (q.get("sm")) cfg.signalLen = Number(q.get("sm"));
+  if (q.get("re")) cfg.allowCont = q.get("re") === "1";
 
   const url =
     "https://api.twelvedata.com/time_series?symbol=XAU/USD" +
@@ -82,7 +96,8 @@ export default async (req) => {
   const last = candles[candles.length - 1];
 
   const lines = [];
-  lines.push(`XAU/USD ${tf} | key ${c.keyValue}, ATR ${c.atrPeriod}, HeikinAshi ${c.useHA ? "on" : "off"}`);
+  lines.push(`XAU/USD ${tf} | key ${c.keyValue}, ATR ${c.atrPeriod}, HA ${c.useHA ? "on" : "off"}, LinReg ${c.linregLen}, smooth ${c.signalLen}, re-entries ${c.allowCont ? "on" : "off"}`);
+  lines.push(`TP ${c.tp1Pips}/${c.tp2Pips}/${c.tp3Pips} pips, SL ${c.slPips} pips`);
   lines.push(`Closed candles used: ${candles.length} (dropped ${dropped} weekend/flat)`);
   if (rawLast && !candles.includes(rawLast)) lines.push("Market looks CLOSED right now (latest candles are flat)");
   lines.push(`Last closed candle opened: ${fmt(last.t)} UTC / ${fmt(last.t + 3600000)} WAT`);
@@ -107,4 +122,3 @@ export default async (req) => {
   }
   return text(lines.join("\n"));
 };
-    
