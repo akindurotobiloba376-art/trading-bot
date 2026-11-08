@@ -81,6 +81,7 @@ export default async (req) => {
   if (!apiKey) return text("Missing TWELVE_API_KEY in Netlify environment variables", 500);
 
   const lot = Number(q.get("lot")) || 0.1;
+  const raw = q.get("raw") === "1"; // raw=1 keeps every candle, like TradingView
   const cfg = {};
   if (q.get("tp")) cfg.tpExt = Number(q.get("tp"));
   if (q.get("sl")) cfg.slATR = Number(q.get("sl"));
@@ -112,7 +113,7 @@ export default async (req) => {
       c: +v.close,
     }))
     .filter((k) => k.t + ms <= now)
-    .filter((k) => marketOpen(k.t) && k.h - k.l >= 0.05);
+    .filter((k) => raw || (marketOpen(k.t) && k.h - k.l >= 0.05));
 
   const WARM = 250;
   if (candles.length < WARM + 200) return text("Not enough candles: " + candles.length);
@@ -128,8 +129,9 @@ export default async (req) => {
   L.push(`B = newer ${day(candles[mid].t)} to ${day(candles[end - 1].t)}`);
   const c = fib.cfg;
   L.push(
-    `Fib: target ${c.tpExt}, stop ${c.slATR} ATR, pivot ${c.len}, Friday cutoff ${c.useFri ? "on" : "off"}, trend filter ${c.useTrend ? "on" : "off"}`
+    `Fib: target ${c.tpExt}, stop ${c.slATR} ATR, pivot ${c.len}, Friday cutoff ${c.useFri ? "on " + c.friHour + "h" : "off"}, trend filter ${c.useTrend ? "on" : "off"}`
   );
+  L.push(`Candle filter: ${raw ? "OFF (raw, all candles)" : "on (market-open, range >= 0.05)"} | candles: ${candles.length}`);
   L.push("Stops that gap past the level fill at the open. Finished trades only.");
   L.push("");
   L.push("FIB ZONE");
